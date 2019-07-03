@@ -1,0 +1,14 @@
+base
+corrplot
+RColorBrewer
+dplyr
+bitops
+RCurl
+lattice
+ggplot2
+caret
+e1071
+rattle
+MASS
+klaR
+kableExtra

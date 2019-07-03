@@ -1,0 +1,220 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "Miguel Bravo Solís"
+date: "July 1, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Introduction
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+## System Setup
+In order to make this document reproducible and to simplify this document's code chunks we will set the seed and load libraries in this section.
+```{r message=FALSE, warning=FALSE }
+library(corrplot)
+library(RColorBrewer)
+library(dplyr)
+library(RCurl)
+library(caret)
+library(e1071)
+library(rattle)
+library(klaR)
+library(kableExtra)
+library(rattle)
+set.seed(568749)
+```
+
+
+## Getting Data
+We will be using training and testing data sets. We comence by loading both into diferent data sets in R. 
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har.
+```{r getting}
+trainingURL <- getURL("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+testingURL <- getURL("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+training <- read.csv(text= trainingURL, na.strings = c("NA", "#DIV/0!"))
+testing <- read.csv(text= testingURL, na.strings = c("NA", "#DIV/0!"))
+```
+
+## Exploratory analysis
+
+Taking a quick look at the data we can observe the training data set contains 19622 observations and 160 variables.
+```{r}
+dim(training)
+```
+Exploring the data we can also notice a number of variables containing NA (an example of this is the *kurtosis_yaw_dumbbell* variable):
+```{r}
+summary(training$kurtosis_yaw_dumbbell)
+```
+
+We would like to remove these as they will no be useful for prediction purposes
+
+We create a rule to classify those variables and remove them from our training dataset.
+```{r}
+training <- training[, (colSums(is.na(training)))/(nrow(training)) < .95]
+```
+
+By looking at the data we observe that variables 1-2 are ID information (# of observation and user name), since the objective is to predict based on sensor activity, we will exclude them as the user name provides no useful information (might result in a biased model).
+
+Variables 3-7 refer to the time ID in which the variables were measured and information about the time window;  1 second window (approximately 8 reads per second), with a 150ms overlapping. We will remove them as the time variables do not provide useful information.
+
+```{r}
+training <- training[, -c(1,2,3,4,5,6,7)]
+```
+
+The resulting data set with 53 variables: 
+```{r echo=FALSE}
+dim(training)
+```
+
+## Training and testing Data Sets
+We will split the training data, into 2 sets: training (70% named *Ptraining*) and testing (30% named *Ptesting*). The testing data (previously named *"testing"*) will remain for validation purposes.
+```{r}
+part <- createDataPartition(training$classe, p=0.7, list = FALSE)
+Ptraining <- training[part,]
+Ptesting <- training[-part,]
+```
+
+The dimensions of both data partirions:
+```{r}
+dim(Ptraining); dim(Ptesting)
+```
+
+Visualizing the correlation matrix:
+
+```{r}
+corMatrix <- cor(Ptraining[, -53])
+```
+
+```{r fig.cap="Correlation matrix", echo=FALSE, out.width = '100%', fig.align="center"}
+corrplot(corMatrix, method="color", title = "Correlation Matrix for training data set", order = "FPC", type = "upper", tl.cex = 0.5, tl.col ="black", col = brewer.pal(n = 10, name = "PiYG"), mar = c(1, 1, 1, 1))
+```
+
+## Training the model
+We will train 3 different models:
+
+1. Classification Trees
+2. Random Forest
+3. Gradient Boosting
+
+We chose this models because are often useful for classification purposes, the logical and simple model of classification trees is trained as it will (likely) give a model with high interpretability.
+
+A random forest model will also be used as it is expected to result in a model best suited for prediction purposes (while losing interpretability) and chooses between multiples trees with random subsampling.
+
+A gradient boosting model will also be trained as it will choose between multiple weak predictors and weigh them in order to build a stronger one.
+
+For each model we will employ cross validation (via *trainControl*) into 5 folds as it creates multiple *testing subsamples*.
+
+
+### 1. Classification Tress
+```{r cache=TRUE}
+set.seed(26430)
+# Defining train control
+train.controlTR <- trainControl(method = "cv", number=5)
+# training the model
+modFitTR <- train(classe ~., data = Ptraining, method = "rpart", trControl=train.controlTR)
+modFitTR
+```
+Classification Tree Plot
+```{r}
+fancyRpartPlot(modFitTR$finalModel, main = "Classification Trees Model Training", sub = "For the training data set", mar = c(1, 1, 3, 1))
+```
+
+```{r}
+# Predicting
+predictTR <- predict(modFitTR, newdata = Ptesting)
+```
+
+Visualizing the results:
+```{r echo=FALSE}
+cMatrixTR <- confusionMatrix(predictTR, Ptesting$classe)
+```
+
+```{r echo=FALSE}
+kable(cMatrixTR$overall, caption = "Confusion Matrix Overall Statistics - Classification Trees", col.names = c("Value")) %>%
+kable_styling(bootstrap_options = "striped", full_width = T, position = "center", font_size = 11)
+```
+
+
+### 2. Random Forest
+```{r cache=TRUE}
+set.seed(2156)
+# Defining train control
+train.controlRF <- trainControl(method = "cv", number=5)
+# training the model
+modFitRF <- train(classe ~., data = Ptraining, method = "rf", trControl=train.controlRF)
+modFitRF$finalModel
+```
+
+
+```{r}
+# Predicting
+predictRF <- predict(modFitRF, newdata = Ptesting)
+```
+Visualizing results:
+
+```{r echo=FALSE}
+cMatrixRF <- confusionMatrix(predictRF, Ptesting$classe)
+```
+
+```{r echo=FALSE}
+kable(cMatrixRF$overall, caption = "Confusion Matrix Overall Statistics - Random Forest", col.names = c("Value")) %>%
+kable_styling(bootstrap_options = "striped", full_width = T, position = "center", font_size = 11)
+```
+
+### 3. Gradient Boosting
+```{r cache=TRUE}
+set.seed(34951)
+# Defining train control
+train.controlGBM <- trainControl(method = "cv", number=5)
+# training the model
+modFitGBM <- train(classe ~., data = Ptraining, method = "gbm", trControl=train.controlGBM, verbose=FALSE)
+modFitGBM
+```
+
+```{r}
+# Predicting
+predictGBM <- predict(modFitGBM, newdata = Ptesting)
+```
+Visualizing results:
+
+```{r echo=FALSE}
+cMatrixGBM <- confusionMatrix(predictGBM, Ptesting$classe)
+```
+
+```{r echo=FALSE}
+kable(cMatrixGBM$overall, caption = "Confusion Matrix Overall Statistics - Boosting", col.names = c("Value")) %>%
+kable_styling(bootstrap_options = "striped", full_width = T, position = "center", font_size = 11)
+```
+
+
+## Final Results & Conclusions
+
+We choose model 2: Random Forest based model as it performs better than the other models, it has a higher accuracy and a lower sample error. As expected, it performs better than the Random Trees model. 
+
+We would expect our out of sample errors to be around:
+```{r, echo=FALSE}
+OOSE <- data.frame("Model"= c("Classification Trees", "Random Forests", "Gradient Boosting"), "Expected Out of Sample Error" = c(1-cMatrixTR$overall[1],1-cMatrixRF$overall[1],1-cMatrixGBM$overall[1]))
+kable(OOSE, caption = "Expected Out Of Sample Errors") %>%
+kable_styling(bootstrap_options = "striped", full_width = T, position = "center", font_size = 12)     
+```
+
+## Validation
+We will apply the Random Forest model to the validation data set (previously named *testing* [^1] ).
+```{r}
+predictVAL <- predict(modFitRF, newdata = testing)
+```
+
+Looking at the predicted values:
+```{r}
+predictVAL
+```
+
+
+
+
+[^1]: Not to be confused with *Ptesting* which is the testing data set used for prediction purposes.
+
+
